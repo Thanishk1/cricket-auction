@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cricket Auction</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #0a0a0a; color: #eee; text-align: center; padding: 20px; }
+        h1 { color: #f5c518; }
+        #player-card { background: #1a1a1a; border: 2px solid #f5c518; border-radius: 10px; padding: 20px; max-width: 400px; margin: 20px auto; }
+        #player-card h2 { margin: 0; font-size: 28px; }
+        #player-card p { color: #aaa; }
+        #bid-amount { font-size: 40px; color: #4caf50; margin: 10px 0; }
+        #timer { font-size: 22px; font-weight: bold; margin-top: 10px; color: #4caf50; transition: color 0.3s; }
+        #timer.warning { color: #ff5252; }
+        #turn-label { margin-top: 8px; color: #ccc; }
+        .teams { display: flex; justify-content: center; gap: 40px; margin-top: 30px; }
+        .team-box { background: #1a1a1a; padding: 15px; border-radius: 8px; width: 220px; }
+        .team-box h3 { margin-top: 0; }
+        .team-box ul { text-align: left; padding-left: 20px; }
+        .controls { margin-top: 20px; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; transition: opacity 0.2s; }
+        #bid-btn { background: #4caf50; color: white; }
+        #pass-btn { background: #f44336; color: white; }
+        button:disabled { background: #444; color: #888; cursor: not-allowed; opacity: 0.5; }
+        #message { margin-top: 15px; color: #f5c518; min-height: 20px; }
+        #start-btn { background: #2196f3; color: white; padding: 12px 30px; font-size: 18px; }
+    </style>
+</head>
+<body>
+    <h1>🏏 Cricket Auction</h1>
+    <button id="start-btn" onclick="startGame()">Start New Game</button>
+
+    <div id="player-card" style="display:none;">
+        <h2 id="player-name">-</h2>
+        <p id="player-season">-</p>
+        <div id="bid-amount">₹0</div>
+        <div id="timer"></div>
+        <div id="turn-label"></div>
+    </div>
+
+    <div class="controls" id="controls" style="display:none;">
+        <button id="bid-btn" onclick="placeBid()">Bid ₹<span id="next-bid-amount">1</span></button>
+        <button id="pass-btn" onclick="passTurn()">Pass</button>
+    </div>
+
+    <div id="message"></div>
+
+    <div class="teams" id="teams" style="display:none;">
+        <div class="team-box">
+            <h3 id="team-a-name">You</h3>
+            <p>Remaining: ₹<span id="team-a-money">50</span></p>
+            <ul id="team-a-players"></ul>
+        </div>
+        <div class="team-box">
+            <h3 id="team-b-name">Team B</h3>
+            <p>Remaining: ₹<span id="team-b-money">50</span></p>
+            <ul id="team-b-players"></ul>
+        </div>
+    </div>
+
+    <script>
+        const BASE_URL = "http://127.0.0.1:5000";
+        let pollInterval = null;
+        let countdownInterval = null;
+        let localSecondsRemaining = null;
+        let myTeamName = "You";
+
+        async function startGame() {
+            const res = await fetch(`${BASE_URL}/start`);
+            const data = await res.json();
+            document.getElementById("player-card").style.display = "block";
+            document.getElementById("controls").style.display = "block";
+            document.getElementById("teams").style.display = "flex";
+            updatePlayerCard(data.current_player, 0, null);
+            updateTeams(data.team_a, data.team_b);
+            setButtonState(null);
+            localSecondsRemaining = null;
+            updateTimerDisplay();
+
+            if (pollInterval) clearInterval(pollInterval);
+            if (countdownInterval) clearInterval(countdownInterval);
+            pollInterval = setInterval(pollStatus, 1000);
+            countdownInterval = setInterval(tickTimer, 1000);
+        }
+
+        async function pollStatus() {
+            const res = await fetch(`${BASE_URL}/status`);
+            const data = await res.json();
+
+            if (data.timeout_event) {
+                document.getElementById("message").innerText = data.timeout_event;
+            }
+
+            localSecondsRemaining = data.seconds_remaining;
+            updatePlayerCard(data.current_player, data.current_highest_bid, data.current_turn);
+            updateTeams(data.team_a, data.team_b);
+            setButtonState(data.current_turn);
+            updateTimerDisplay();
+        }
+
+        function tickTimer() {
+            if (localSecondsRemaining !== null && localSecondsRemaining > 0) {
+                localSecondsRemaining -= 1;
+                updateTimerDisplay();
+            }
+        }
+
+        function updateTimerDisplay() {
+            const timerEl = document.getElementById("timer");
+            if (localSecondsRemaining === null || localSecondsRemaining === undefined) {
+                timerEl.innerText = "";
+                timerEl.classList.remove("warning");
+            } else {
+                timerEl.innerText = `⏱ ${localSecondsRemaining}s left`;
+                timerEl.classList.toggle("warning", localSecondsRemaining <= 3);
+            }
+        }
+
+        function updatePlayerCard(player, bid, turn) {
+            if (!player) {
+                document.getElementById("player-name").innerText = "Auction Over!";
+                document.getElementById("player-season").innerText = "";
+                document.getElementById("controls").style.display = "none";
+                return;
+            }
+            document.getElementById("player-name").innerText = player.name;
+            document.getElementById("player-season").innerText = `Season ${player.season}`;
+            document.getElementById("bid-amount").innerText = `₹${bid}`;
+            document.getElementById("next-bid-amount").innerText = bid + 1;
+            document.getElementById("turn-label").innerText = turn ? `${turn}'s turn to respond` : "Either team can bid first";
+        }
+
+        function setButtonState(turn) {
+            const isMyTurnOrOpen = (turn === null || turn === myTeamName);
+            document.getElementById("bid-btn").disabled = !isMyTurnOrOpen;
+            document.getElementById("pass-btn").disabled = !isMyTurnOrOpen;
+        }
+
+        function updateTeams(teamA, teamB) {
+            document.getElementById("team-a-name").innerText = teamA.name;
+            document.getElementById("team-a-money").innerText = teamA.remaining_amount;
+            document.getElementById("team-a-players").innerHTML = teamA.Players.map(p => `<li>${p}</li>`).join("");
+
+            document.getElementById("team-b-name").innerText = teamB.name;
+            document.getElementById("team-b-money").innerText = teamB.remaining_amount;
+            document.getElementById("team-b-players").innerHTML = teamB.Players.map(p => `<li>${p}</li>`).join("");
+        }
+
+        async function placeBid() {
+            const amount = parseInt(document.getElementById("next-bid-amount").innerText);
+            const res = await fetch(`${BASE_URL}/bid`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ team_name: myTeamName, bid_amount: amount })
+            });
+            const data = await res.json();
+            document.getElementById("message").innerText = data.message || data.error;
+            pollStatus();
+        }
+
+        async function passTurn() {
+            const res = await fetch(`${BASE_URL}/pass`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ team_name: myTeamName })
+            });
+            const data = await res.json();
+            document.getElementById("message").innerText = data.message || data.error;
+            pollStatus();
+        }
+    </script>
+</body>
+</html>
